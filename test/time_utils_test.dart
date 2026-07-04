@@ -1,0 +1,105 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:day_cap/core/utils/time_utils.dart';
+
+void main() {
+  group('hourLabel — ปัดลงเป็นชั่วโมง', () {
+    test('10:01 → 10:00', () {
+      expect(hourLabel(DateTime(2026, 7, 3, 10, 1)), '10:00');
+    });
+    test('12:58 → 12:00', () {
+      expect(hourLabel(DateTime(2026, 7, 3, 12, 58)), '12:00');
+    });
+    test('เที่ยงคืน 00:30 → 00:00', () {
+      expect(hourLabel(DateTime(2026, 7, 3, 0, 30)), '00:00');
+    });
+    test('เลขชั่วโมงหลักเดียวเติม 0 → 09:00', () {
+      expect(hourLabel(DateTime(2026, 7, 3, 9, 5)), '09:00');
+    });
+  });
+
+  group('weekStart — อาทิตย์ 00:00', () {
+    // 2026-07-03 เป็นวันศุกร์ → อาทิตย์ของสัปดาห์นี้คือ 2026-06-28
+    test('ศุกร์ 3 ก.ค. 2026 → อา. 28 มิ.ย. 2026', () {
+      expect(weekStart(DateTime(2026, 7, 3, 14, 0)), DateTime(2026, 6, 28));
+    });
+    test('วันอาทิตย์เอง → ตัวเอง 00:00', () {
+      expect(weekStart(DateTime(2026, 6, 28, 23, 59)), DateTime(2026, 6, 28));
+    });
+    test('วันเสาร์ → อาทิตย์ก่อนหน้า', () {
+      expect(weekStart(DateTime(2026, 7, 4, 12, 0)), DateTime(2026, 6, 28));
+    });
+    test('ข้ามเดือน: อา. 1 ก.พ. → 1 ก.พ.', () {
+      expect(weekStart(DateTime(2026, 2, 1, 8)), DateTime(2026, 2, 1));
+    });
+  });
+
+  group('wipeTime & shouldWipe', () {
+    test('สัปดาห์เริ่ม 28 มิ.ย. → ล้าง 5 ก.ค. 00:00', () {
+      expect(wipeTimeForWeek(DateTime(2026, 6, 28)), DateTime(2026, 7, 5));
+    });
+    test('ยังอยู่สัปดาห์เดิม → ไม่ล้าง', () {
+      final stored = weekStart(DateTime(2026, 7, 1));
+      expect(shouldWipe(DateTime(2026, 7, 4, 23, 59), stored), false);
+    });
+    test('ข้ามไปสัปดาห์ใหม่ → ล้าง', () {
+      final stored = weekStart(DateTime(2026, 7, 1));
+      expect(shouldWipe(DateTime(2026, 7, 5, 0, 1), stored), true);
+    });
+    test('ข้ามหลายสัปดาห์ (เปิดแอปหลังหายไปนาน) → ล้าง', () {
+      final stored = weekStart(DateTime(2026, 7, 1));
+      expect(shouldWipe(DateTime(2026, 8, 1), stored), true);
+    });
+  });
+
+  group('countdown — เสาร์ 20:00 → อาทิตย์ 00:00', () {
+    test('countdownStart = เสาร์ 20:00', () {
+      // สัปดาห์ 28 มิ.ย.–4 ก.ค. → เสาร์คือ 4 ก.ค., 20:00
+      expect(countdownStart(DateTime(2026, 7, 3)), DateTime(2026, 7, 4, 20, 0));
+    });
+    test('ศุกร์ยังไม่เข้า countdown', () {
+      expect(isInCountdown(DateTime(2026, 7, 3, 23, 0)), false);
+    });
+    test('เสาร์ 20:00 เข้า countdown แล้ว', () {
+      expect(isInCountdown(DateTime(2026, 7, 4, 20, 0)), true);
+    });
+    test('เสาร์ 21:30 ยังอยู่ใน countdown', () {
+      expect(isInCountdown(DateTime(2026, 7, 4, 21, 30)), true);
+    });
+    test('timeUntilWipe ที่เสาร์ 20:00 = 4 ชม.', () {
+      expect(timeUntilWipe(DateTime(2026, 7, 4, 20, 0)),
+          const Duration(hours: 4));
+    });
+    test('timeUntilWipe ที่เสาร์ 22:15 = 1 ชม. 45 นาที', () {
+      expect(timeUntilWipe(DateTime(2026, 7, 4, 22, 15)),
+          const Duration(hours: 1, minutes: 45));
+    });
+  });
+
+  group('formatCountdown — สไตล์ Duolingo HH:MM', () {
+    test('4 ชม. → 04:00', () {
+      expect(formatCountdown(const Duration(hours: 4)), '04:00');
+    });
+    test('1 ชม. 45 นาที → 01:45', () {
+      expect(formatCountdown(const Duration(hours: 1, minutes: 45)), '01:45');
+    });
+    test('3 ชม. 59 นาที 30 วิ → 03:59 (ตัดวินาที)', () {
+      expect(
+          formatCountdown(
+              const Duration(hours: 3, minutes: 59, seconds: 30)),
+          '03:59');
+    });
+    test('ติดลบ → 00:00', () {
+      expect(formatCountdown(const Duration(seconds: -10)), '00:00');
+    });
+  });
+
+  group('weekDays — 7 วัน อาทิตย์→เสาร์', () {
+    test('คืน 7 วันเรียงถูก', () {
+      final days = weekDays(DateTime(2026, 7, 3));
+      expect(days.length, 7);
+      expect(days.first, DateTime(2026, 6, 28)); // อาทิตย์
+      expect(days.last, DateTime(2026, 7, 4)); // เสาร์
+      expect(days[3], DateTime(2026, 7, 1)); // พุธ
+    });
+  });
+}
