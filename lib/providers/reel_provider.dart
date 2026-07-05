@@ -60,8 +60,15 @@ class ReelController extends AsyncNotifier<WeekLog> {
     final fileName = '$id.mp4';
     await _storage.importRecording(tempPath, fileName);
 
-    // อ่านความยาว + ขนาดจริงจากไฟล์
-    final meta = await _probe(await _storage.absolutePath(fileName));
+    // ตัด guard ขอบ + re-encode (แก้เสียง artifact หัว-ท้ายจากไฟล์กล้อง)
+    final absPath = await _storage.absolutePath(fileName);
+    final raw = await _probe(absPath);
+    await ref
+        .read(exportServiceProvider)
+        .trimGuardInPlace(absPath, raw.durationMs);
+
+    // อ่านความยาว + ขนาดจริงจากไฟล์ (หลังตัด/re-encode)
+    final meta = await _probe(absPath);
 
     final clip = Clip(
       id: id,
@@ -73,7 +80,7 @@ class ReelController extends AsyncNotifier<WeekLog> {
 
     week.dayFor(at).addClip(clip, width: meta.width, height: meta.height);
     await _repo.save(week);
-    state = AsyncData(week);
+    state = AsyncData(week.copy());
   }
 
   /// ลบคลิป
@@ -88,7 +95,7 @@ class ReelController extends AsyncNotifier<WeekLog> {
     await _storage.deleteClipFile(removed.fileName);
     if (dayLog.isEmpty) week.days.remove(dayLog.day);
     await _repo.save(week);
-    state = AsyncData(week);
+    state = AsyncData(week.copy());
   }
 
   /// อัปเดตจุดตัดหัว-ท้ายของคลิป
@@ -105,7 +112,7 @@ class ReelController extends AsyncNotifier<WeekLog> {
     clip.trimStartMs = trimStartMs;
     clip.trimEndMs = trimEndMs;
     await _repo.save(week);
-    state = AsyncData(week);
+    state = AsyncData(week.copy());
   }
 
   /// จัดลำดับคลิปใหม่ (ลากสลับในหน้า Timeline)
@@ -122,7 +129,7 @@ class ReelController extends AsyncNotifier<WeekLog> {
       ordered[i].orderIndex = i;
     }
     await _repo.save(week);
-    state = AsyncData(week);
+    state = AsyncData(week.copy());
   }
 
   /// บังคับโหลดใหม่ (เช็ค+ล้างรายสัปดาห์)

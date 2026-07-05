@@ -31,8 +31,8 @@ class Clip {
   })  : trimStartMs = trimStartMs ?? 0,
         trimEndMs = trimEndMs ?? durationMs;
 
-  /// ป้ายเวลาที่จะโชว์/เผาลงวิดีโอ เช่น "10:00" (ปัดลงชั่วโมง)
-  String get label => hourLabel(recordedAt);
+  /// ป้ายเวลาที่จะโชว์/เผาลงวิดีโอ = เวลาจริง "HH:MM"
+  String get label => timeLabel(recordedAt);
 
   /// ความยาวหลังตัด
   int get trimmedDurationMs => (trimEndMs - trimStartMs).clamp(0, durationMs);

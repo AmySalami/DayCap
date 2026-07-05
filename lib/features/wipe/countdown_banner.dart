@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/theme/app_tokens.dart';
+import '../../core/theme/design_tokens.dart';
 import '../../core/utils/time_utils.dart';
 import '../../providers/reel_provider.dart';
 
@@ -57,26 +59,21 @@ class _CountdownBannerState extends ConsumerState<CountdownBanner> {
     final showing = _preview || isInCountdown(_now);
     if (!showing) return const SizedBox.shrink();
     final remaining = _preview && !isInCountdown(_now)
-        ? '03:59'
+        ? '03:59:30'
         : formatCountdown(timeUntilWipe(_now));
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
-        color: const Color(0xFFE53935).withValues(alpha: 0.92),
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.3),
-            blurRadius: 8,
-          ),
-        ],
+        color: AppToken.alertFill, // accent (amber) ตามกติกา DS
+        borderRadius: BorderRadius.circular(DsRadius.md),
+        boxShadow: DsElevation.pill,
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           const Icon(Icons.local_fire_department,
-              color: Colors.white, size: 22),
+              color: AppToken.alertText, size: DsType.icon),
           const SizedBox(width: 10),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -85,16 +82,18 @@ class _CountdownBannerState extends ConsumerState<CountdownBanner> {
               Text(
                 'ล้าง Log ใน  $remaining',
                 style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
+                  color: AppToken.alertText, // navy บนพื้น accent
+                  fontSize: DsType.body,
+                  fontWeight: DsType.bold,
                   fontFeatures: [FontFeature.tabularFigures()],
-                  letterSpacing: 1,
                 ),
               ),
-              const Text(
+              Text(
                 'เซฟก่อนหาย! ทุกอย่างจะถูกลบเที่ยงคืนวันอาทิตย์',
-                style: TextStyle(color: Colors.white70, fontSize: 11),
+                style: TextStyle(
+                  color: AppToken.alertText.withValues(alpha: 0.75),
+                  fontSize: DsType.badge,
+                ),
               ),
             ],
           ),

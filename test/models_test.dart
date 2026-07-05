@@ -13,8 +13,8 @@ Clip _clip(String id, DateTime at, {int dur = 5000}) => Clip(
 
 void main() {
   group('Clip', () {
-    test('label ปัดลงชั่วโมงจาก recordedAt', () {
-      expect(_clip('a', DateTime(2026, 7, 3, 12, 58)).label, '12:00');
+    test('label = เวลาจริง HH:MM จาก recordedAt', () {
+      expect(_clip('a', DateTime(2026, 7, 3, 12, 58)).label, '12:58');
     });
     test('trim default = เต็มคลิป', () {
       final c = _clip('a', DateTime(2026, 7, 3, 10), dur: 8000);
@@ -37,7 +37,7 @@ void main() {
       expect(back.trimStartMs, 500);
       expect(back.trimEndMs, 7000);
       expect(back.orderIndex, 2);
-      expect(back.label, '10:00');
+      expect(back.label, '10:01');
     });
   });
 

@@ -26,6 +26,10 @@ class WeekLog {
 
   DayLog? dayOrNull(DateTime dt) => days[startOfDay(dt)];
 
+  /// สร้าง instance ใหม่ (days map ใหม่ ชี้ DayLog เดิม) เพื่อให้ Riverpod notify
+  /// หลัง mutate ในที่ (add/delete/trim/reorder)
+  WeekLog copy() => WeekLog(weekStartDate: weekStartDate, days: Map.of(days));
+
   Map<String, dynamic> toJson() => {
         'weekStartDate': weekStartDate.toIso8601String(),
         'days': days.values.map((d) => d.toJson()).toList(),

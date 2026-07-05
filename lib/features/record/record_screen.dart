@@ -4,15 +4,20 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/theme/app_tokens.dart';
+import '../../core/theme/design_tokens.dart';
+import '../../core/theme/text_styles.dart';
 import '../../core/utils/time_utils.dart';
+import '../../core/widgets/glass.dart';
+import '../../core/widgets/time_badge.dart';
 import '../../providers/reel_provider.dart';
-import '../calendar/week_calendar_screen.dart';
-import '../player/player_screen.dart';
-import '../wipe/countdown_banner.dart';
 import 'widgets/hold_button.dart';
 
 class RecordScreen extends ConsumerStatefulWidget {
-  const RecordScreen({super.key});
+  const RecordScreen({super.key, this.onExit});
+
+  /// เรียกเมื่อจะออกจากกล้อง (X / ปัดซ้าย / ถ่ายเสร็จ) — shell จะเลื่อนกลับ Home
+  final VoidCallback? onExit;
 
   @override
   ConsumerState<RecordScreen> createState() => _RecordScreenState();
@@ -21,23 +26,35 @@ class RecordScreen extends ConsumerStatefulWidget {
 class _RecordScreenState extends ConsumerState<RecordScreen>
     with WidgetsBindingObserver {
   CameraController? _controller;
+  List<CameraDescription> _cameras = const [];
+  CameraLensDirection _lens = CameraLensDirection.back;
   bool _initializing = false;
   bool _recording = false;
   bool _saving = false;
+  bool _torch = false;
   DateTime? _startedAt;
   String? _error;
 
+  // self-timer
+  int _timerSec = 0; // 0 = ปิด, 3, 10
+  int _countdown = 0; // ตัวเลขนับถอยหลังที่โชว์
+  Timer? _countdownTimer;
+
+  // แตะ = อัด 3 วิ auto · กดค้าง = อัดตามที่ค้าง (ขั้นต่ำ 3 วิ)
+  static const int _minClipMs = 3000;
+  Timer? _autoStopTimer;
+  bool _wantStop = false; // ปล่อยนิ้วก่อนที่จะเริ่มอัดจริง (แตะเร็วมาก)
+
   Timer? _clock;
-  String _nowLabel = hourLabel(DateTime.now());
+  String _nowLabel = timeLabel(DateTime.now());
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _setupCamera();
-    // อัปเดตป้ายเวลาทุก 30 วิ (ป้ายจริงเปลี่ยนแค่ตอนขึ้นชั่วโมงใหม่)
-    _clock = Timer.periodic(const Duration(seconds: 30), (_) {
-      final l = hourLabel(DateTime.now());
+    _clock = Timer.periodic(const Duration(seconds: 1), (_) {
+      final l = timeLabel(DateTime.now());
       if (l != _nowLabel && mounted) setState(() => _nowLabel = l);
     });
   }
@@ -46,31 +63,79 @@ class _RecordScreenState extends ConsumerState<RecordScreen>
     if (_initializing) return;
     _initializing = true;
     try {
-      final cameras = await availableCameras();
-      if (cameras.isEmpty) {
+      if (_cameras.isEmpty) _cameras = await availableCameras();
+      if (_cameras.isEmpty) {
         if (mounted) setState(() => _error = 'ไม่พบกล้องบนอุปกรณ์นี้');
         return;
       }
-      final back = cameras.firstWhere(
-        (c) => c.lensDirection == CameraLensDirection.back,
-        orElse: () => cameras.first,
+      final cam = _cameras.firstWhere(
+        (c) => c.lensDirection == _lens,
+        orElse: () => _cameras.first,
       );
-      final controller = CameraController(
-        back,
-        ResolutionPreset.high,
-        enableAudio: true,
-      );
+      final controller =
+          CameraController(cam, ResolutionPreset.high, enableAudio: true);
       await controller.initialize();
+      await _applyStabilization(controller);
       if (!mounted) {
         await controller.dispose();
         return;
       }
-      setState(() => _controller = controller);
+      setState(() {
+        _controller = controller;
+        _torch = false;
+      });
     } catch (e) {
       if (mounted) setState(() => _error = 'เปิดกล้องไม่ได้: $e');
     } finally {
       _initializing = false;
     }
+  }
+
+  // เปิด video stabilization ของ iOS (OIS+EIS) — เลือกโหมดที่เครื่องรองรับ
+  // level1≈standard (latency น้อยสุด) · level2≈cinematic (กันเยอะแต่ delay) · level3≈max
+  // เลือก level1 ก่อนเพื่อให้ preview ไม่หน่วง
+  Future<void> _applyStabilization(CameraController c) async {
+    try {
+      final modes = (await c.getSupportedVideoStabilizationModes()).toSet();
+      for (final m in const [
+        VideoStabilizationMode.level1,
+        VideoStabilizationMode.level2,
+        VideoStabilizationMode.level3,
+      ]) {
+        if (modes.contains(m)) {
+          await c.setVideoStabilizationMode(m);
+          return;
+        }
+      }
+    } catch (_) {
+      // เครื่อง/แพลตฟอร์มไม่รองรับ → ข้ามไป (ไม่พัง)
+    }
+  }
+
+  Future<void> _swapCamera() async {
+    if (_recording || _initializing) return;
+    _lens = _lens == CameraLensDirection.back
+        ? CameraLensDirection.front
+        : CameraLensDirection.back;
+    final old = _controller;
+    _controller = null;
+    setState(() {});
+    await old?.dispose();
+    await _setupCamera();
+  }
+
+  Future<void> _toggleTorch() async {
+    final c = _controller;
+    if (c == null || _lens == CameraLensDirection.front) return;
+    _torch = !_torch;
+    try {
+      await c.setFlashMode(_torch ? FlashMode.torch : FlashMode.off);
+    } catch (_) {}
+    if (mounted) setState(() {});
+  }
+
+  void _cycleTimer() {
+    setState(() => _timerSec = switch (_timerSec) { 0 => 3, 3 => 10, _ => 0 });
   }
 
   @override
@@ -79,33 +144,87 @@ class _RecordScreenState extends ConsumerState<RecordScreen>
     if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden) {
-      // เข้า background → คืนกล้อง (iOS ตัดการเข้าถึงกล้องอยู่แล้ว)
       if (c != null) {
         _controller = null;
         c.dispose();
         if (mounted) setState(() {});
       }
     } else if (state == AppLifecycleState.resumed) {
-      // กลับมา → เปิดกล้องใหม่ถ้ายังไม่มี
-      if (_controller == null && !_initializing) {
-        _setupCamera();
-      }
+      if (_controller == null && !_initializing) _setupCamera();
     }
   }
 
-  Future<void> _startRecording() async {
+  // กดค้าง: ถ้าตั้ง timer → นับถอยหลังก่อน แล้วเริ่มอัด (ยังกดค้างอยู่)
+  void _onHoldStart() {
+    if (_recording || _countdown > 0) return;
+    if (_timerSec > 0) {
+      setState(() => _countdown = _timerSec);
+      _countdownTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+        if (!mounted) return;
+        setState(() => _countdown--);
+        if (_countdown <= 0) {
+          t.cancel();
+          _beginRecording();
+        }
+      });
+    } else {
+      _beginRecording();
+    }
+  }
+
+  void _onHoldStop() {
+    if (_countdown > 0) {
+      _countdownTimer?.cancel();
+      setState(() => _countdown = 0);
+      return;
+    }
+    if (!_recording) {
+      // ปล่อยก่อน startVideoRecording เสร็จ → ให้ _beginRecording หยุดเองเมื่อพร้อม
+      _wantStop = true;
+      return;
+    }
+    _scheduleStop();
+  }
+
+  // หยุดอัด แต่การันตีความยาวขั้นต่ำ 3 วิ (แตะ/กดสั้น → อัดต่อให้ครบ)
+  void _scheduleStop() {
+    final elapsed = _startedAt == null
+        ? 0
+        : DateTime.now().difference(_startedAt!).inMilliseconds;
+    final remain = _minClipMs - elapsed;
+    if (remain > 0) {
+      _autoStopTimer?.cancel();
+      _autoStopTimer = Timer(Duration(milliseconds: remain), () {
+        if (mounted && _recording) _stopRecording();
+      });
+    } else {
+      _stopRecording();
+    }
+  }
+
+  Future<void> _beginRecording() async {
     final c = _controller;
     if (c == null || !c.value.isInitialized || c.value.isRecordingVideo) return;
     try {
       await c.startVideoRecording();
       _startedAt = DateTime.now();
-      setState(() => _recording = true);
+      setState(() {
+        _recording = true;
+        _countdown = 0;
+      });
+      // ถ้าปล่อยนิ้วไปแล้วระหว่างรอเริ่มอัด → หยุดเมื่อครบ 3 วิ
+      if (_wantStop) {
+        _wantStop = false;
+        _scheduleStop();
+      }
     } catch (e) {
       setState(() => _error = 'เริ่มอัดไม่ได้: $e');
     }
   }
 
   Future<void> _stopRecording() async {
+    _autoStopTimer?.cancel();
+    _wantStop = false;
     final c = _controller;
     if (c == null || !c.value.isRecordingVideo) return;
     setState(() {
@@ -114,10 +233,16 @@ class _RecordScreenState extends ConsumerState<RecordScreen>
     });
     try {
       final file = await c.stopVideoRecording();
-      await ref.read(reelProvider.notifier).addRecording(
-            tempPath: file.path,
-            recordedAt: _startedAt,
-          );
+      await ref
+          .read(reelProvider.notifier)
+          .addRecording(tempPath: file.path, recordedAt: _startedAt);
+      final cam = _controller;
+      _controller = null;
+      await cam?.dispose();
+      if (mounted) {
+        _exit(); // shell เลื่อนกลับ Home (คลิปใหม่ต่อท้ายแล้ว)
+        return;
+      }
     } catch (e) {
       setState(() => _error = 'บันทึกไม่ได้: $e');
     } finally {
@@ -128,6 +253,8 @@ class _RecordScreenState extends ConsumerState<RecordScreen>
   @override
   void dispose() {
     _clock?.cancel();
+    _countdownTimer?.cancel();
+    _autoStopTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _controller?.dispose();
     super.dispose();
@@ -135,100 +262,128 @@ class _RecordScreenState extends ConsumerState<RecordScreen>
 
   @override
   Widget build(BuildContext context) {
-    final controller = _controller;
-    final week = ref.watch(reelProvider);
-    final todayCount = week.value == null
-        ? 0
-        : clipsForDay(week.value!, DateTime.now()).length;
+    final c = _controller;
 
     return Scaffold(
-      backgroundColor: Colors.black,
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          // พรีวิวกล้อง
-          if (_error != null)
-            _ErrorView(message: _error!, onRetry: _retry)
-          else if (controller != null && controller.value.isInitialized)
-            FittedBox(
-              fit: BoxFit.cover,
-              child: SizedBox(
-                width: controller.value.previewSize?.height ?? 1080,
-                height: controller.value.previewSize?.width ?? 1920,
-                child: CameraPreview(controller),
-              ),
-            )
-          else
-            const Center(
-                child: CircularProgressIndicator(color: Colors.white)),
+      backgroundColor: AppToken.videoBackdrop,
+      body: GestureDetector(
+        onHorizontalDragEnd: (d) {
+          if ((d.primaryVelocity ?? 0) < -150) _exit();
+        },
+        child: SafeArea(
+          child: Column(
+            children: [
+              // กรอบกล้องมน
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 6, 10, 10),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(28),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        if (_error != null)
+                          _ErrorView(message: _error!, onRetry: _retry)
+                        else if (c != null && c.value.isInitialized)
+                          FittedBox(
+                            fit: BoxFit.cover,
+                            child: SizedBox(
+                              width: c.value.previewSize?.height ?? 1080,
+                              height: c.value.previewSize?.width ?? 1920,
+                              child: CameraPreview(c),
+                            ),
+                          )
+                        else
+                          const ColoredBox(color: AppToken.videoBackdrop),
 
-          // ป้ายเวลา (ตัวที่จะเผาลงวิดีโอ)
-          Positioned(
-            top: MediaQuery.of(context).padding.top + 16,
-            left: 20,
-            child: _TimeBadge(label: _nowLabel),
-          ),
+                        // ป้ายเวลา กลางจอ
+                        Center(child: TimeBadge(label: _nowLabel)),
 
-          // ปุ่มดูปฏิทิน (ขวาบน)
-          Positioned(
-            top: MediaQuery.of(context).padding.top + 12,
-            right: 12,
-            child: IconButton(
-              icon: const Icon(Icons.calendar_month, color: Colors.white),
-              onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => const WeekCalendarScreen())),
-            ),
-          ),
+                        // ปุ่มปิด (ขวาบน)
+                        Positioned(
+                          top: 12,
+                          right: 12,
+                          child: GlassCircle(
+                            onTap: _exit,
+                            child: const Icon(Icons.close,
+                                color: DsColor.white, size: 24),
+                          ),
+                        ),
 
-          // แบนเนอร์นับถอยหลังก่อนล้าง (โผล่เฉพาะเสาร์เย็น)
-          Positioned(
-            top: MediaQuery.of(context).padding.top + 64,
-            left: 16,
-            right: 16,
-            child: const Align(
-              alignment: Alignment.topCenter,
-              child: CountdownBanner(),
-            ),
-          ),
+                        // แฟลช (ซ้ายล่างในกรอบ)
+                        if (_lens == CameraLensDirection.back)
+                          Positioned(
+                            left: 12,
+                            bottom: 12,
+                            child: GlassCircle(
+                              onTap: _toggleTorch,
+                              child: Icon(
+                                _torch ? Icons.flash_on : Icons.flash_off,
+                                color: DsColor.white,
+                                size: 24,
+                              ),
+                            ),
+                          ),
 
-          // แถบล่าง: จำนวนคลิปวันนี้ + ปุ่มถ่าย + ปุ่ม Play
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: MediaQuery.of(context).padding.bottom + 28,
-            child: Column(
-              children: [
-                if (_saving)
-                  const Padding(
-                    padding: EdgeInsets.only(bottom: 12),
-                    child: Text('กำลังบันทึก…',
-                        style: TextStyle(color: Colors.white)),
+                        // countdown self-timer
+                        if (_countdown > 0)
+                          Center(
+                            child: Text('$_countdown',
+                                style: DsText.display(
+                                    size: 96, color: DsColor.white)),
+                          ),
+
+                        if (_saving)
+                          const Positioned(
+                            bottom: 14,
+                            left: 0,
+                            right: 0,
+                            child: Center(
+                              child: Text('กำลังบันทึก…',
+                                  style: TextStyle(color: DsColor.white)),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                ),
+              ),
+
+              // แถวควบคุม: timer · shutter · swap
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 32),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const SizedBox(width: 56),
+                    GlassCircle(
+                      onTap: _cycleTimer,
+                      child: _timerSec > 0
+                          ? Text('${_timerSec}s',
+                              style: const TextStyle(
+                                  color: DsColor.accent,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16))
+                          : const Icon(Icons.timer_outlined,
+                              color: DsColor.white, size: 24),
+                    ),
                     HoldButton(
                       recording: _recording,
-                      onStart: _startRecording,
-                      onStop: _stopRecording,
+                      onStart: _onHoldStart,
+                      onStop: _onHoldStop,
                     ),
-                    _PlayButton(
-                      enabled: todayCount > 0,
-                      count: todayCount,
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              PlayerScreen(day: startOfDay(DateTime.now())),
-                        ),
-                      ),
+                    GlassCircle(
+                      onTap: _swapCamera,
+                      child: const Icon(Icons.cameraswitch,
+                          color: DsColor.white, size: 24),
                     ),
                   ],
                 ),
-              ],
-            ),
+              ),
+              // เว้นที่ให้ tab ของ shell ที่ปักอยู่ล่างสุด
+              const SizedBox(height: 66),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -237,63 +392,14 @@ class _RecordScreenState extends ConsumerState<RecordScreen>
     setState(() => _error = null);
     _setupCamera();
   }
-}
 
-class _TimeBadge extends StatelessWidget {
-  const _TimeBadge({required this.label});
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.35),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Text(
-        label,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 26,
-          fontWeight: FontWeight.w700,
-          letterSpacing: 1,
-        ),
-      ),
-    );
-  }
-}
-
-class _PlayButton extends StatelessWidget {
-  const _PlayButton({
-    required this.enabled,
-    required this.count,
-    required this.onTap,
-  });
-  final bool enabled;
-  final int count;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 56,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          IconButton(
-            iconSize: 40,
-            icon: Icon(
-              Icons.play_circle_fill,
-              color: enabled ? Colors.white : Colors.white24,
-            ),
-            onPressed: enabled ? onTap : null,
-          ),
-          Text('$count คลิป',
-              style: const TextStyle(color: Colors.white70, fontSize: 11)),
-        ],
-      ),
-    );
+  void _exit() {
+    final onExit = widget.onExit;
+    if (onExit != null) {
+      onExit();
+    } else if (Navigator.of(context).canPop()) {
+      Navigator.of(context).maybePop();
+    }
   }
 }
 
@@ -310,11 +416,11 @@ class _ErrorView extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.videocam_off, color: Colors.white54, size: 48),
+            const Icon(Icons.videocam_off, color: DsColor.whiteMid, size: 48),
             const SizedBox(height: 16),
             Text(message,
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white70)),
+                style: DsText.body(color: DsColor.whiteMid)),
             const SizedBox(height: 16),
             FilledButton(onPressed: onRetry, child: const Text('ลองอีกครั้ง')),
           ],

@@ -2,18 +2,18 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:day_cap/core/utils/time_utils.dart';
 
 void main() {
-  group('hourLabel — ปัดลงเป็นชั่วโมง', () {
-    test('10:01 → 10:00', () {
-      expect(hourLabel(DateTime(2026, 7, 3, 10, 1)), '10:00');
+  group('timeLabel — เวลาจริง HH:MM', () {
+    test('10:01 → 10:01', () {
+      expect(timeLabel(DateTime(2026, 7, 3, 10, 1)), '10:01');
     });
-    test('12:58 → 12:00', () {
-      expect(hourLabel(DateTime(2026, 7, 3, 12, 58)), '12:00');
+    test('12:58 → 12:58', () {
+      expect(timeLabel(DateTime(2026, 7, 3, 12, 58)), '12:58');
     });
-    test('เที่ยงคืน 00:30 → 00:00', () {
-      expect(hourLabel(DateTime(2026, 7, 3, 0, 30)), '00:00');
+    test('เที่ยงคืน 00:30 → 00:30', () {
+      expect(timeLabel(DateTime(2026, 7, 3, 0, 30)), '00:30');
     });
-    test('เลขชั่วโมงหลักเดียวเติม 0 → 09:00', () {
-      expect(hourLabel(DateTime(2026, 7, 3, 9, 5)), '09:00');
+    test('เติม 0 หน้าเลขหลักเดียว → 09:05', () {
+      expect(timeLabel(DateTime(2026, 7, 3, 9, 5)), '09:05');
     });
   });
 
@@ -75,21 +75,42 @@ void main() {
     });
   });
 
-  group('formatCountdown — สไตล์ Duolingo HH:MM', () {
-    test('4 ชม. → 04:00', () {
-      expect(formatCountdown(const Duration(hours: 4)), '04:00');
+  group('formatCountdown — HH:MM:SS', () {
+    test('4 ชม. → 04:00:00', () {
+      expect(formatCountdown(const Duration(hours: 4)), '04:00:00');
     });
-    test('1 ชม. 45 นาที → 01:45', () {
-      expect(formatCountdown(const Duration(hours: 1, minutes: 45)), '01:45');
+    test('1 ชม. 45 นาที → 01:45:00', () {
+      expect(formatCountdown(const Duration(hours: 1, minutes: 45)), '01:45:00');
     });
-    test('3 ชม. 59 นาที 30 วิ → 03:59 (ตัดวินาที)', () {
+    test('3 ชม. 59 นาที 30 วิ → 03:59:30', () {
       expect(
           formatCountdown(
               const Duration(hours: 3, minutes: 59, seconds: 30)),
-          '03:59');
+          '03:59:30');
     });
-    test('ติดลบ → 00:00', () {
-      expect(formatCountdown(const Duration(seconds: -10)), '00:00');
+    test('ติดลบ → 00:00:00', () {
+      expect(formatCountdown(const Duration(seconds: -10)), '00:00:00');
+    });
+  });
+
+  group('stepDay — เลื่อนวันแบบ clamp ไม่วน', () {
+    // สัปดาห์ 28 มิ.ย.(อา.) – 4 ก.ค.(ส.) 2026
+    final sat = DateTime(2026, 7, 4);
+    final sun = DateTime(2026, 6, 28);
+    test('เสาร์ + ปัดต่อ = อยู่เสาร์ (ไม่วน)', () {
+      expect(stepDay(sat, 1, now: sat), sat);
+    });
+    test('อาทิตย์ - ปัดต่อ = อยู่อาทิตย์ (ไม่วน)', () {
+      expect(stepDay(sun, -1, now: sat), sun);
+    });
+    test('พุธ +1 = พฤหัส', () {
+      expect(stepDay(DateTime(2026, 7, 1), 1, now: sat), DateTime(2026, 7, 2));
+    });
+    test('พุธ -1 = อังคาร', () {
+      expect(stepDay(DateTime(2026, 7, 1), -1, now: sat), DateTime(2026, 6, 30));
+    });
+    test('เสาร์ -1 = ศุกร์', () {
+      expect(stepDay(sat, -1, now: sat), DateTime(2026, 7, 3));
     });
   });
 

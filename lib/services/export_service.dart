@@ -124,5 +124,41 @@ class ExportService {
     }
   }
 
+  /// normalize คลิปที่เพิ่งอัด — แก้เสียง artifact ที่ขอบ (กล้อง iOS):
+  /// - ตัด guard หัว-ท้ายอย่างละ [guardMs] (เสียงป๊อปตอนเริ่ม + เสียงหายตอนท้าย)
+  /// - re-encode ทั้งภาพ+เสียง → ล้าง edit-list/priming ไปในตัว
+  /// ถ้าคลิปสั้นเกินจะ re-encode เฉยๆ ไม่ตัด guard
+  /// คืน true ถ้าแทนไฟล์เดิมสำเร็จ (ล้มเหลว = คงไฟล์เดิม ไม่พัง)
+  Future<bool> trimGuardInPlace(String absPath, int durMs,
+      {int guardMs = 150}) async {
+    final tmp = '$absPath.norm.mp4';
+    final keepMs = durMs - guardMs * 2;
+    final doGuard = keepMs >= 400;
+
+    final args = <String>['-y'];
+    if (doGuard) args.addAll(['-ss', (guardMs / 1000).toStringAsFixed(3)]);
+    args.addAll(['-i', absPath]);
+    if (doGuard) args.addAll(['-t', (keepMs / 1000).toStringAsFixed(3)]);
+    args.addAll([
+      // ลดเสียงรบกวน/ลม: ตัดความถี่ต่ำ (รัมเบิล/ลม) + FFT denoise
+      '-af', 'highpass=f=100,afftdn=nr=12',
+      '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac', '-b:a', '128k',
+      '-movflags', '+faststart',
+      tmp,
+    ]);
+
+    try {
+      final session = await FFmpegKit.executeWithArguments(args);
+      if (ReturnCode.isSuccess(await session.getReturnCode())) {
+        await File(tmp).rename(absPath);
+        return true;
+      }
+    } catch (_) {/* คงไฟล์เดิม */}
+    final f = File(tmp);
+    if (await f.exists()) await f.delete();
+    return false;
+  }
+
   int _even(int v) => v.isEven ? v : v - 1;
 }

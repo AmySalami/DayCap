@@ -4,7 +4,7 @@
 /// กติกา:
 /// - สัปดาห์เริ่ม "วันอาทิตย์ 00:00" จบ "วันเสาร์ 23:59"
 /// - วันตัดที่ 00:00
-/// - ป้ายเวลา = เวลาเริ่มถ่าย ปัดลงเป็นชั่วโมง (floor) → "HH:00"
+/// - ป้ายเวลา = เวลาจริงที่เริ่มถ่าย → "HH:MM"
 /// - ล้าง Log ทั้งหมดตอน "อาทิตย์ 00:00" (= ต้นสัปดาห์ถัดไป)
 /// - Countdown เริ่ม "เสาร์ 20:00" → นับถอยหลัง 4 ชม. ถึงเวลาล้าง
 library;
@@ -12,9 +12,12 @@ library;
 /// ระยะเวลาก่อนล้างที่เริ่มโชว์ countdown (เสาร์ 20:00 → อาทิตย์ 00:00 = 4 ชม.)
 const Duration kCountdownWindow = Duration(hours: 4);
 
-/// ป้ายเวลาของคลิป: ปัดลงเป็นชั่วโมง เช่น 10:01 → "10:00", 12:58 → "12:00"
-String hourLabel(DateTime dt) {
-  return '${dt.hour.toString().padLeft(2, '0')}:00';
+/// ป้ายเวลาของคลิป = เวลาจริงที่เริ่มถ่าย รูปแบบ HH:MM (ไม่ปัด)
+/// เช่น 10:01 → "10:01", 12:58 → "12:58"
+String timeLabel(DateTime dt) {
+  final h = dt.hour.toString().padLeft(2, '0');
+  final m = dt.minute.toString().padLeft(2, '0');
+  return '$h:$m';
 }
 
 /// เที่ยงคืนของวันนั้น (ตัดเวลาออก) — ใช้แยก "วัน"
@@ -58,16 +61,29 @@ Duration timeUntilWipe(DateTime now) {
   return remaining.isNegative ? Duration.zero : remaining;
 }
 
-/// จัดรูป countdown แบบ Duolingo: "HH:MM" เช่น 3 ชม. 59 นาที → "03:59"
+/// จัดรูป countdown "HH:MM:SS" เช่น 3 ชม. 59 นาที 30 วิ → "03:59:30"
 String formatCountdown(Duration d) {
   final safe = d.isNegative ? Duration.zero : d;
   final h = safe.inHours;
   final m = safe.inMinutes % 60;
-  return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
+  final s = safe.inSeconds % 60;
+  return '${h.toString().padLeft(2, '0')}:'
+      '${m.toString().padLeft(2, '0')}:'
+      '${s.toString().padLeft(2, '0')}';
 }
 
 /// 7 วันของสัปดาห์ที่ [now] อยู่ (อาทิตย์ → เสาร์) สำหรับ Calendar
 List<DateTime> weekDays(DateTime now) {
   final s = weekStart(now);
   return List.generate(7, (i) => DateTime(s.year, s.month, s.day + i));
+}
+
+/// เลื่อนวันภายในสัปดาห์เดียวกัน (อา.→ส.) แบบ clamp ที่ขอบ — ไม่วน
+/// เสาร์ + ปัดต่อ = อยู่เสาร์, อาทิตย์ - ปัดต่อ = อยู่อาทิตย์
+DateTime stepDay(DateTime current, int delta, {DateTime? now}) {
+  final days = weekDays(now ?? current);
+  final idx = days.indexOf(startOfDay(current));
+  if (idx == -1) return startOfDay(current);
+  final ni = (idx + delta).clamp(0, days.length - 1);
+  return days[ni];
 }

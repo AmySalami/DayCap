@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
-import 'features/record/record_screen.dart';
+import 'core/theme/app_theme.dart';
+import 'features/shell/main_shell.dart';
 
 class DayCapApp extends StatelessWidget {
   const DayCapApp({super.key});
@@ -10,14 +11,8 @@ class DayCapApp extends StatelessWidget {
     return MaterialApp(
       title: 'day_cap',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF6C63FF),
-          brightness: Brightness.dark,
-        ),
-        useMaterial3: true,
-      ),
-      home: const RecordScreen(),
+      theme: AppTheme.theme,
+      home: const MainShell(),
     );
   }
 }
