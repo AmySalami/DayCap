@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
 
 import '../../core/theme/design_tokens.dart';
 import '../../core/theme/text_styles.dart';
@@ -40,7 +41,8 @@ class Timeline extends StatefulWidget {
   State<Timeline> createState() => _TimelineState();
 }
 
-class _TimelineState extends State<Timeline> {
+class _TimelineState extends State<Timeline>
+    with SingleTickerProviderStateMixin {
   static const double _pxPerSec = 42.0;
   static const double _scale = _pxPerSec / 1000.0; // px ต่อ ms (คงที่)
   static const double _handleW = 26;
@@ -65,6 +67,26 @@ class _TimelineState extends State<Timeline> {
   List<double> _lastLefts = const [];
   double _lastOff = 0;
   double _lastMaxOff = 0;
+
+  // momentum/inertia ตอน pan (ปัดแรง = พุ่งไกล)
+  late final AnimationController _fling;
+
+  @override
+  void initState() {
+    super.initState();
+    _fling = AnimationController.unbounded(vsync: this)
+      ..addListener(() {
+        final clamped = _fling.value.clamp(0.0, _lastMaxOff);
+        setState(() => _offset = clamped);
+        if (clamped != _fling.value) _fling.stop(); // ชนขอบ → หยุด
+      });
+  }
+
+  @override
+  void dispose() {
+    _fling.dispose();
+    super.dispose();
+  }
 
   String get _selId => widget.clips[widget.selected].id;
 
@@ -93,20 +115,15 @@ class _TimelineState extends State<Timeline> {
   void didUpdateWidget(covariant Timeline old) {
     super.didUpdateWidget(old);
     if (old.selected != widget.selected) {
+      // แค่ล้าง live state — ไม่เลื่อนแถบ (คงตำแหน่งเดิมตามที่ผู้ใช้ต้องการ)
       _liveStart = null;
       _liveEnd = null;
       _mode = 0;
-      // เลื่อนให้คลิปที่เพิ่งเลือกโผล่มาในจอ
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || widget.selected >= _lastLefts.length) return;
-        final target =
-            (_lastLefts[widget.selected] - 16).clamp(0.0, _lastMaxOff);
-        if ((target - _lastOff).abs() > 1) setState(() => _offset = target);
-      });
     }
   }
 
   void _dragStart(double x) {
+    _fling.stop(); // แตะจับ = หยุด momentum ที่ค้างอยู่
     final sel = widget.selected;
     _baseX = x;
     _baseOffset = _lastOff;
@@ -135,9 +152,10 @@ class _TimelineState extends State<Timeline> {
   void _dragUpdate(double x) {
     final total = x - _baseX;
     if (_mode == 1) {
-      final ns = (_baseStart + total / _scale)
-          .round()
-          .clamp(0, _baseEnd - Timeline.minGapMs);
+      final ns = (_baseStart + total / _scale).round().clamp(
+        0,
+        _baseEnd - Timeline.minGapMs,
+      );
       final nw = (_baseEnd - ns) * _scale;
       setState(() {
         _liveStart = ns;
@@ -146,9 +164,10 @@ class _TimelineState extends State<Timeline> {
       widget.onChanged(ns, _baseEnd);
     } else if (_mode == 2) {
       final dur = widget.durOf(_selId);
-      final ne = (_baseEnd + total / _scale)
-          .round()
-          .clamp(_baseStart + Timeline.minGapMs, dur);
+      final ne = (_baseEnd + total / _scale).round().clamp(
+        _baseStart + Timeline.minGapMs,
+        dur,
+      );
       setState(() => _liveEnd = ne);
       widget.onChanged(_baseStart, ne);
     } else if (_mode == 3) {
@@ -156,12 +175,19 @@ class _TimelineState extends State<Timeline> {
     }
   }
 
-  void _dragEnd() {
+  void _dragEnd([DragEndDetails? d]) {
+    final wasPan = _mode == 3;
+    final v = d?.primaryVelocity ?? 0;
     setState(() {
       _mode = 0;
       _liveStart = null;
       _liveEnd = null;
     });
+    // ปัด (pan) แรงพอ → ปล่อยให้ไหลต่อด้วย friction physics (เหมือน scroll ปกติ)
+    if (wasPan && v.abs() > 50 && _lastMaxOff > 0) {
+      // _offset เพิ่มเมื่อปัดซ้าย (นิ้วไปทางลบ) → ความเร็วของ offset = -v
+      _fling.animateWith(FrictionSimulation(0.135, _offset, -v));
+    }
   }
 
   @override
@@ -174,9 +200,14 @@ class _TimelineState extends State<Timeline> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text('ยาว ${_fmt(trimmed)}',
-              style: DsText.body(
-                  size: DsType.sm, color: DsColor.white, weight: DsType.bold)),
+          Text(
+            'ยาว ${_fmt(trimmed)}',
+            style: DsText.body(
+              size: DsType.sm,
+              color: DsColor.white,
+              weight: DsType.bold,
+            ),
+          ),
           const SizedBox(height: 10),
           LayoutBuilder(
             builder: (context, c) {
@@ -201,8 +232,8 @@ class _TimelineState extends State<Timeline> {
                 behavior: HitTestBehavior.opaque,
                 onHorizontalDragStart: (d) => _dragStart(d.localPosition.dx),
                 onHorizontalDragUpdate: (d) => _dragUpdate(d.localPosition.dx),
-                onHorizontalDragEnd: (_) => _dragEnd(),
-                onHorizontalDragCancel: _dragEnd,
+                onHorizontalDragEnd: (d) => _dragEnd(d),
+                onHorizontalDragCancel: () => _dragEnd(),
                 child: SizedBox(
                   height: _h,
                   width: double.infinity,
@@ -225,8 +256,10 @@ class _TimelineState extends State<Timeline> {
             },
           ),
           const SizedBox(height: 10),
-          Text('แตะเลือกคลิป · ลากที่จับเหลืองเพื่อตัด · กดค้างแล้วลากลงเพื่อลบ',
-              style: DsText.body(size: DsType.badge, color: DsColor.whiteMid)),
+          Text(
+            'แตะเลือกคลิป · ลากที่จับเหลืองเพื่อตัด · กดค้างแล้วลากลงเพื่อลบ',
+            style: DsText.body(size: DsType.badge, color: DsColor.whiteMid),
+          ),
         ],
       ),
     );
@@ -270,9 +303,10 @@ class _TimelineState extends State<Timeline> {
         maxLines: 1,
         overflow: TextOverflow.clip,
         style: TextStyle(
-            color: DsColor.ink,
-            fontWeight: DsType.bold,
-            fontSize: DsType.caption),
+          color: DsColor.ink,
+          fontWeight: DsType.bold,
+          fontSize: DsType.caption,
+        ),
       ),
     );
   }
@@ -307,17 +341,19 @@ class _TimelineState extends State<Timeline> {
               child: const ColoredBox(color: DsColor.white),
             ),
           Positioned(
-              left: 0,
-              top: 0,
-              bottom: 0,
-              width: _handleW,
-              child: _grip(left: true)),
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: _handleW,
+            child: _grip(left: true),
+          ),
           Positioned(
-              right: 0,
-              top: 0,
-              bottom: 0,
-              width: _handleW,
-              child: _grip(left: false)),
+            right: 0,
+            top: 0,
+            bottom: 0,
+            width: _handleW,
+            child: _grip(left: false),
+          ),
         ],
       ),
     );
@@ -332,8 +368,11 @@ class _TimelineState extends State<Timeline> {
           right: Radius.circular(left ? 0 : DsRadius.sm),
         ),
       ),
-      child: Icon(left ? Icons.chevron_left : Icons.chevron_right,
-          color: DsColor.secondary, size: 20),
+      child: Icon(
+        left ? Icons.chevron_left : Icons.chevron_right,
+        color: DsColor.secondary,
+        size: 20,
+      ),
     );
   }
 }
@@ -356,11 +395,14 @@ class TrashDropZone extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('ลากมาปล่อยเพื่อลบ',
-                  style: DsText.body(
-                      size: DsType.sm,
-                      color: active ? DsColor.ai2 : DsColor.whiteMid,
-                      weight: DsType.bold)),
+              Text(
+                'ลากมาปล่อยเพื่อลบ',
+                style: DsText.body(
+                  size: DsType.sm,
+                  color: active ? DsColor.ai2 : DsColor.whiteMid,
+                  weight: DsType.bold,
+                ),
+              ),
               const SizedBox(height: 10),
               AnimatedContainer(
                 duration: const Duration(milliseconds: 150),
@@ -370,10 +412,15 @@ class TrashDropZone extends StatelessWidget {
                   shape: BoxShape.circle,
                   color: active ? DsColor.ai2 : Colors.transparent,
                   border: Border.all(
-                      color: active ? DsColor.ai2 : DsColor.whiteMid, width: 2),
+                    color: active ? DsColor.ai2 : DsColor.whiteMid,
+                    width: 2,
+                  ),
                 ),
-                child: Icon(Icons.delete,
-                    color: active ? DsColor.white : DsColor.whiteMid, size: 24),
+                child: Icon(
+                  Icons.delete,
+                  color: active ? DsColor.white : DsColor.whiteMid,
+                  size: 24,
+                ),
               ),
             ],
           ),

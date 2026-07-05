@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:video_player/video_player.dart';
@@ -22,13 +23,25 @@ import 'widgets/week_calendar_strip.dart';
 /// หน้า Home (หน้าขวาของ shell): วิดีโอเล่นในกรอบมน (ขนาดเท่าหน้ากล้อง)
 /// + ปฏิทินใต้กรอบ + Edit mode inline (morph) — ไม่มี background blur แล้ว
 class HomeScreen extends ConsumerStatefulWidget {
-  const HomeScreen({super.key, this.onCamera, this.editProgress});
-
-  /// เรียกเมื่อจะไปหน้ากล้อง (ปัดขวาบนปฏิทิน) — shell เลื่อนไป Camera
-  final VoidCallback? onCamera;
+  const HomeScreen({
+    super.key,
+    this.editProgress,
+    this.pageActive,
+    this.onPagerDragStart,
+    this.onPagerDragUpdate,
+    this.onPagerDragEnd,
+  });
 
   /// ส่งค่าความคืบหน้า edit mode (0..1) ให้ shell เลื่อน tab ลงตาม
   final ValueNotifier<double>? editProgress;
+
+  /// Home เป็นหน้า active ไหม — false ตอนอยู่/เข้ากล้อง → พักวิดีโอ (กันกล้องกระตุก)
+  final ValueListenable<bool>? pageActive;
+
+  /// finger-tracked pager (ปัดบนปฏิทิน → ขับ slide ไปกล้องแบบ 1:1)
+  final VoidCallback? onPagerDragStart;
+  final ValueChanged<double>? onPagerDragUpdate; // dx pixels
+  final ValueChanged<double>? onPagerDragEnd; // velocity px/s
 
   @override
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
@@ -59,14 +72,26 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   @override
   void initState() {
     super.initState();
-    _edit = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 320),
-    )..addListener(() {
-        widget.editProgress?.value = _edit.value;
-        setState(() {});
-      });
+    _edit =
+        AnimationController(
+          vsync: this,
+          duration: const Duration(milliseconds: 320),
+        )..addListener(() {
+          widget.editProgress?.value = _edit.value;
+          setState(() {});
+        });
+    widget.pageActive?.addListener(_onPageActive);
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadDay());
+  }
+
+  // พักวิดีโอเมื่อออกจากหน้า Home (ไปกล้อง) → เล่นต่อเมื่อกลับมา (กันกล้องกระตุก)
+  void _onPageActive() {
+    final active = widget.pageActive?.value ?? true;
+    if (active) {
+      if (!_editing && !_sharing) _controller?.play();
+    } else {
+      _controller?.pause();
+    }
   }
 
   int _effStart(Clip c) => _editing ? _startDraft[c.id]! : c.trimStartMs;
@@ -107,8 +132,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
     _durDraft[clip.id] = next.value.duration.inMilliseconds;
     if (_editing) {
-      _endDraft[clip.id] =
-          (_endDraft[clip.id] ?? _durDraft[clip.id]!).clamp(0, _durDraft[clip.id]!);
+      _endDraft[clip.id] = (_endDraft[clip.id] ?? _durDraft[clip.id]!).clamp(
+        0,
+        _durDraft[clip.id]!,
+      );
     }
     await next.seekTo(Duration(milliseconds: _effStart(clip)));
     await next.play();
@@ -148,7 +175,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final frac = ((pos - clip.trimStartMs) / span).clamp(0.0, 1.0);
     if (frac != _progress) setState(() => _progress = frac);
 
-    final ended = pos >= clip.trimEndMs ||
+    final ended =
+        pos >= clip.trimEndMs ||
         (c.value.position >= c.value.duration &&
             !c.value.isPlaying &&
             c.value.duration > Duration.zero);
@@ -206,8 +234,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     for (final c in _clips) {
       if (_startDraft[c.id] != c.trimStartMs ||
           _endDraft[c.id] != c.trimEndMs) {
-        await notifier.updateTrim(_selectedDay, c.id,
-            trimStartMs: _startDraft[c.id]!, trimEndMs: _endDraft[c.id]!);
+        await notifier.updateTrim(
+          _selectedDay,
+          c.id,
+          trimStartMs: _startDraft[c.id]!,
+          trimEndMs: _endDraft[c.id]!,
+        );
       }
     }
     await _closeEdit();
@@ -288,9 +320,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         Navigator.of(context).pop();
       }
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('รวมวิดีโอไม่สำเร็จ')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('รวมวิดีโอไม่สำเร็จ')));
       }
     } finally {
       if (mounted) {
@@ -303,6 +335,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   @override
   void dispose() {
+    widget.pageActive?.removeListener(_onPageActive);
     _edit.dispose();
     _shareProgress.dispose();
     _controller?.removeListener(_watch);
@@ -322,7 +355,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       }
       if (_editing) return;
       final now = clipsForDay(w, _selectedDay);
-      final changed = now.length != _clips.length ||
+      final changed =
+          now.length != _clips.length ||
           (now.isNotEmpty &&
               _clips.isNotEmpty &&
               now.last.id != _clips.last.id);
@@ -399,7 +433,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                         top: 30,
                                         left: 12,
                                         child: TimeBadge(
-                                            label: _clips[_index].label),
+                                          label: _clips[_index].label,
+                                        ),
                                       ),
                                     Positioned(
                                       top: 64,
@@ -422,10 +457,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                     opacity: t.clamp(0, 1),
                                     child: DecoratedBox(
                                       decoration: BoxDecoration(
-                                        borderRadius:
-                                            BorderRadius.circular(28),
+                                        borderRadius: BorderRadius.circular(28),
                                         border: Border.all(
-                                            color: DsColor.accent, width: 2),
+                                          color: DsColor.accent,
+                                          width: 2,
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -467,8 +503,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     translation: Offset(0, t * 2.2),
                     child: GlassCircle(
                       onTap: _sharing ? null : _shareDay,
-                      child: const Icon(Icons.ios_share,
-                          color: DsColor.white, size: 22),
+                      child: const Icon(
+                        Icons.ios_share,
+                        color: DsColor.white,
+                        size: 22,
+                      ),
                     ),
                   ),
                 ),
@@ -486,8 +525,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     translation: Offset(0, t * 2.2),
                     child: GlassCircle(
                       onTap: _enterEdit,
-                      child: const Icon(Icons.tune,
-                          color: DsColor.white, size: 22),
+                      child: const Icon(
+                        Icons.tune,
+                        color: DsColor.white,
+                        size: 22,
+                      ),
                     ),
                   ),
                 ),
@@ -524,9 +566,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   Widget _calendarZone(Set<DateTime> daysWithClips) {
     return GestureDetector(
-      onHorizontalDragEnd: (d) {
-        if ((d.primaryVelocity ?? 0) > 150) widget.onCamera?.call();
-      },
+      // ปัดแนวนอนบนปฏิทิน = ขับ pager ไปกล้องแบบ finger-tracked
+      onHorizontalDragStart: (_) => widget.onPagerDragStart?.call(),
+      onHorizontalDragUpdate: (d) => widget.onPagerDragUpdate?.call(d.delta.dx),
+      onHorizontalDragEnd: (d) =>
+          widget.onPagerDragEnd?.call(d.primaryVelocity ?? 0),
       onVerticalDragEnd: (d) {
         if ((d.primaryVelocity ?? 0) > 150) _enterEdit();
       },
@@ -545,8 +589,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   Widget _editHeader(double topPad) {
     return Padding(
       // เว้น 12px จากขอบกรอบวิดีโอเท่ากันทุกด้าน (กรอบ margin ซ้ายขวา 10 / บน 6)
-      padding:
-          EdgeInsets.only(top: topPad + 18, bottom: 10, left: 22, right: 22),
+      padding: EdgeInsets.only(
+        top: topPad + 18,
+        bottom: 10,
+        left: 22,
+        right: 22,
+      ),
       child: Row(
         children: [
           GlassCircle(
@@ -555,9 +603,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           ),
           Expanded(
             child: Center(
-              child: Text('แก้ไข',
-                  style:
-                      DsText.body(color: DsColor.white, weight: DsType.bold)),
+              child: Text(
+                'แก้ไข',
+                style: DsText.body(color: DsColor.white, weight: DsType.bold),
+              ),
             ),
           ),
           // ปุ่มบันทึก = primary (amber) ไอคอน check
@@ -571,8 +620,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 color: DsColor.accent,
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.check,
-                  color: DsColor.secondary, size: 26),
+              child: const Icon(
+                Icons.check,
+                color: DsColor.secondary,
+                size: 26,
+              ),
             ),
           ),
         ],
@@ -625,18 +677,28 @@ class _EmptyDay extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.movie_creation_outlined,
-              size: 64, color: DsColor.white.withValues(alpha: 0.4)),
+          Icon(
+            Icons.movie_creation_outlined,
+            size: 64,
+            color: DsColor.white.withValues(alpha: 0.4),
+          ),
           const SizedBox(height: 16),
           Text(
             isToday ? 'ยังไม่มีคลิปวันนี้' : 'ไม่มีคลิป',
             style: DsText.display(
-                size: DsType.h3, color: DsColor.white, weight: DsType.bold),
+              size: DsType.h3,
+              color: DsColor.white,
+              weight: DsType.bold,
+            ),
           ),
           const SizedBox(height: 6),
-          Text('$dow ${day.day}/${day.month}',
-              style: DsText.body(
-                  size: DsType.sm, color: DsColor.white.withValues(alpha: 0.6))),
+          Text(
+            '$dow ${day.day}/${day.month}',
+            style: DsText.body(
+              size: DsType.sm,
+              color: DsColor.white.withValues(alpha: 0.6),
+            ),
+          ),
         ],
       ),
     );

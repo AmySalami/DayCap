@@ -14,10 +14,21 @@ import '../../providers/reel_provider.dart';
 import 'widgets/hold_button.dart';
 
 class RecordScreen extends ConsumerStatefulWidget {
-  const RecordScreen({super.key, this.onExit});
+  const RecordScreen({
+    super.key,
+    this.onExit,
+    this.onPagerDragStart,
+    this.onPagerDragUpdate,
+    this.onPagerDragEnd,
+  });
 
-  /// เรียกเมื่อจะออกจากกล้อง (X / ปัดซ้าย / ถ่ายเสร็จ) — shell จะเลื่อนกลับ Home
+  /// เรียกเมื่อจะออกจากกล้อง (X / ถ่ายเสร็จ) — shell จะเลื่อนกลับ Home
   final VoidCallback? onExit;
+
+  /// finger-tracked pager (ปัดบนพื้นที่กล้อง → ขับ slide กลับ Home แบบ 1:1)
+  final VoidCallback? onPagerDragStart;
+  final ValueChanged<double>? onPagerDragUpdate; // dx pixels
+  final ValueChanged<double>? onPagerDragEnd; // velocity px/s
 
   @override
   ConsumerState<RecordScreen> createState() => _RecordScreenState();
@@ -72,8 +83,11 @@ class _RecordScreenState extends ConsumerState<RecordScreen>
         (c) => c.lensDirection == _lens,
         orElse: () => _cameras.first,
       );
-      final controller =
-          CameraController(cam, ResolutionPreset.high, enableAudio: true);
+      final controller = CameraController(
+        cam,
+        ResolutionPreset.high,
+        enableAudio: true,
+      );
       await controller.initialize();
       await _applyStabilization(controller);
       if (!mounted) {
@@ -135,7 +149,13 @@ class _RecordScreenState extends ConsumerState<RecordScreen>
   }
 
   void _cycleTimer() {
-    setState(() => _timerSec = switch (_timerSec) { 0 => 3, 3 => 10, _ => 0 });
+    setState(
+      () => _timerSec = switch (_timerSec) {
+        0 => 3,
+        3 => 10,
+        _ => 0,
+      },
+    );
   }
 
   @override
@@ -266,15 +286,17 @@ class _RecordScreenState extends ConsumerState<RecordScreen>
 
     return Scaffold(
       backgroundColor: AppToken.videoBackdrop,
-      body: GestureDetector(
-        onHorizontalDragEnd: (d) {
-          if ((d.primaryVelocity ?? 0) < -150) _exit();
-        },
-        child: SafeArea(
-          child: Column(
-            children: [
-              // กรอบกล้องมน
-              Expanded(
+      body: SafeArea(
+        child: Column(
+          children: [
+            // กรอบกล้องมน — ปัดแนวนอนที่นี่ = ขับ pager กลับ Home แบบ finger-tracked
+            Expanded(
+              child: GestureDetector(
+                onHorizontalDragStart: (_) => widget.onPagerDragStart?.call(),
+                onHorizontalDragUpdate: (d) =>
+                    widget.onPagerDragUpdate?.call(d.delta.dx),
+                onHorizontalDragEnd: (d) =>
+                    widget.onPagerDragEnd?.call(d.primaryVelocity ?? 0),
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(10, 6, 10, 10),
                   child: ClipRRect(
@@ -305,8 +327,11 @@ class _RecordScreenState extends ConsumerState<RecordScreen>
                           right: 12,
                           child: GlassCircle(
                             onTap: _exit,
-                            child: const Icon(Icons.close,
-                                color: DsColor.white, size: 24),
+                            child: const Icon(
+                              Icons.close,
+                              color: DsColor.white,
+                              size: 24,
+                            ),
                           ),
                         ),
 
@@ -328,9 +353,13 @@ class _RecordScreenState extends ConsumerState<RecordScreen>
                         // countdown self-timer
                         if (_countdown > 0)
                           Center(
-                            child: Text('$_countdown',
-                                style: DsText.display(
-                                    size: 96, color: DsColor.white)),
+                            child: Text(
+                              '$_countdown',
+                              style: DsText.display(
+                                size: 96,
+                                color: DsColor.white,
+                              ),
+                            ),
                           ),
 
                         if (_saving)
@@ -339,8 +368,10 @@ class _RecordScreenState extends ConsumerState<RecordScreen>
                             left: 0,
                             right: 0,
                             child: Center(
-                              child: Text('กำลังบันทึก…',
-                                  style: TextStyle(color: DsColor.white)),
+                              child: Text(
+                                'กำลังบันทึก…',
+                                style: TextStyle(color: DsColor.white),
+                              ),
                             ),
                           ),
                       ],
@@ -348,41 +379,50 @@ class _RecordScreenState extends ConsumerState<RecordScreen>
                   ),
                 ),
               ),
+            ),
 
-              // แถวควบคุม: timer · shutter · swap
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 32),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    GlassCircle(
-                      onTap: _cycleTimer,
-                      child: _timerSec > 0
-                          ? Text('${_timerSec}s',
-                              style: const TextStyle(
-                                  color: DsColor.accent,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16))
-                          : const Icon(Icons.timer_outlined,
-                              color: DsColor.white, size: 24),
+            // แถวควบคุม: timer · shutter · swap
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  GlassCircle(
+                    onTap: _cycleTimer,
+                    child: _timerSec > 0
+                        ? Text(
+                            '${_timerSec}s',
+                            style: const TextStyle(
+                              color: DsColor.accent,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          )
+                        : const Icon(
+                            Icons.timer_outlined,
+                            color: DsColor.white,
+                            size: 24,
+                          ),
+                  ),
+                  HoldButton(
+                    recording: _recording,
+                    onStart: _onHoldStart,
+                    onStop: _onHoldStop,
+                  ),
+                  GlassCircle(
+                    onTap: _swapCamera,
+                    child: const Icon(
+                      Icons.cameraswitch,
+                      color: DsColor.white,
+                      size: 24,
                     ),
-                    HoldButton(
-                      recording: _recording,
-                      onStart: _onHoldStart,
-                      onStop: _onHoldStop,
-                    ),
-                    GlassCircle(
-                      onTap: _swapCamera,
-                      child: const Icon(Icons.cameraswitch,
-                          color: DsColor.white, size: 24),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-              // เว้นที่ให้ tab ของ shell ที่ปักอยู่ล่างสุด
-              const SizedBox(height: 66),
-            ],
-          ),
+            ),
+            // เว้นที่ให้ tab ของ shell ที่ปักอยู่ล่างสุด
+            const SizedBox(height: 66),
+          ],
         ),
       ),
     );
@@ -418,9 +458,11 @@ class _ErrorView extends StatelessWidget {
           children: [
             const Icon(Icons.videocam_off, color: DsColor.whiteMid, size: 48),
             const SizedBox(height: 16),
-            Text(message,
-                textAlign: TextAlign.center,
-                style: DsText.body(color: DsColor.whiteMid)),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: DsText.body(color: DsColor.whiteMid),
+            ),
             const SizedBox(height: 16),
             FilledButton(onPressed: onRetry, child: const Text('ลองอีกครั้ง')),
           ],
