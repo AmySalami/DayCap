@@ -36,7 +36,7 @@ class ExportService {
   }) async {
     final clips = day.orderedClips;
     if (clips.isEmpty) {
-      throw ExportException('วันนี้ไม่มีคลิปให้รวม');
+      throw ExportException('No clips to merge today');
     }
 
     // ผืนผ้าใบ = ขนาดคลิปแรก (ทำให้เป็นเลขคู่สำหรับ H.264)
@@ -53,7 +53,7 @@ class ExportService {
 
     for (var i = 0; i < clips.length; i++) {
       onProgress?.call(
-          ExportProgress(i, total, 'ประมวลผลคลิป ${i + 1}/${clips.length}'));
+          ExportProgress(i, total, 'Processing clip ${i + 1}/${clips.length}'));
       final clip = clips[i];
 
       // ป้ายเวลา → PNG เท่าผืนผ้าใบ
@@ -84,12 +84,12 @@ class ExportService {
         '-video_track_timescale', '30000',
         segPath,
       ];
-      await _run(args, 'ประมวลผลคลิป ${i + 1}');
+      await _run(args, 'Processing clip ${i + 1}');
       segments.add(segPath);
     }
 
     // concat
-    onProgress?.call(ExportProgress(clips.length, total, 'กำลังรวมคลิป…'));
+    onProgress?.call(ExportProgress(clips.length, total, 'Merging clips…'));
     final listPath = '${work.path}/list.txt';
     await File(listPath)
         .writeAsString(segments.map((s) => "file '$s'").join('\n'));
@@ -99,7 +99,7 @@ class ExportService {
       await _run(
         ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy',
           '-movflags', '+faststart', outPath],
-        'รวมคลิป',
+        'Merge clips',
       );
     } catch (_) {
       // เผื่อ stream copy ไม่ลงตัว → re-encode
@@ -107,11 +107,11 @@ class ExportService {
         ['-y', '-f', 'concat', '-safe', '0', '-i', listPath,
           '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
           '-c:a', 'aac', '-movflags', '+faststart', outPath],
-        'รวมคลิป (re-encode)',
+        'Merge clips (re-encode)',
       );
     }
 
-    onProgress?.call(ExportProgress(total, total, 'เสร็จแล้ว'));
+    onProgress?.call(ExportProgress(total, total, 'Done'));
     return outPath;
   }
 
@@ -120,7 +120,7 @@ class ExportService {
     final rc = await session.getReturnCode();
     if (!ReturnCode.isSuccess(rc)) {
       final logs = await session.getAllLogsAsString();
-      throw ExportException('$step ล้มเหลว\n${logs ?? ''}');
+      throw ExportException('$step failed\n${logs ?? ''}');
     }
   }
 

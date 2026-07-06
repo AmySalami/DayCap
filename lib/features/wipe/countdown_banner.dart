@@ -80,7 +80,7 @@ class _CountdownBannerState extends ConsumerState<CountdownBanner> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                'ล้าง Log ใน  $remaining',
+                'Wipes in  $remaining',
                 style: const TextStyle(
                   color: AppToken.alertText, // navy บนพื้น accent
                   fontSize: DsType.body,
@@ -89,7 +89,7 @@ class _CountdownBannerState extends ConsumerState<CountdownBanner> {
                 ),
               ),
               Text(
-                'เซฟก่อนหาย! ทุกอย่างจะถูกลบเที่ยงคืนวันอาทิตย์',
+                'Save before it\'s gone! Everything wipes Sunday midnight',
                 style: TextStyle(
                   color: AppToken.alertText.withValues(alpha: 0.75),
                   fontSize: DsType.badge,

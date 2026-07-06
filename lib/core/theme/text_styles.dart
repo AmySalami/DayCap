@@ -39,14 +39,17 @@ class DsText {
         letterSpacing: letterSpacing,
       );
 
-  /// eyebrow / label ตัวเล็กเว้นวรรคกว้าง (uppercase caller เอง)
-  static TextStyle eyebrow({Color color = DsColor.secondary}) =>
-      GoogleFonts.hankenGrotesk(
-        fontSize: DsType.eyebrow,
-        color: color,
-        fontWeight: DsType.semibold,
-        letterSpacing: DsType.track(DsType.trackWider, DsType.eyebrow),
-      );
+  /// eyebrow / label เว้นวรรคกว้าง (uppercase caller เอง)
+  /// [size] ปรับได้ (default = DsType.eyebrow) — tracking คำนวณตามขนาดให้อัตโนมัติ
+  static TextStyle eyebrow({
+    Color color = DsColor.secondary,
+    double size = DsType.eyebrow,
+  }) => GoogleFonts.hankenGrotesk(
+    fontSize: size,
+    color: color,
+    fontWeight: DsType.semibold,
+    letterSpacing: DsType.track(DsType.trackWider, size),
+  );
 
   /// ปุ่ม
   static TextStyle button({Color color = DsColor.secondary}) =>

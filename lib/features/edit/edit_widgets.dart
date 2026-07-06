@@ -201,7 +201,7 @@ class _TimelineState extends State<Timeline>
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            'ยาว ${_fmt(trimmed)}',
+            'Length ${_fmt(trimmed)}',
             style: DsText.body(
               size: DsType.sm,
               color: DsColor.white,
@@ -257,7 +257,7 @@ class _TimelineState extends State<Timeline>
           ),
           const SizedBox(height: 10),
           Text(
-            'แตะเลือกคลิป · ลากที่จับเหลืองเพื่อตัด · กดค้างแล้วลากลงเพื่อลบ',
+            'Tap to select · Drag handles to trim · Hold & drag down to delete',
             style: DsText.body(size: DsType.badge, color: DsColor.whiteMid),
           ),
         ],
@@ -326,9 +326,8 @@ class _TimelineState extends State<Timeline>
           Positioned.fill(
             child: DecoratedBox(
               decoration: BoxDecoration(
-                color: DsColor.paper2,
+                color: DsColor.accent, // primary เต็มบล็อก
                 borderRadius: BorderRadius.circular(DsRadius.sm),
-                border: Border.all(color: DsColor.accent, width: 3),
               ),
             ),
           ),
@@ -338,7 +337,7 @@ class _TimelineState extends State<Timeline>
               top: 4,
               bottom: 4,
               width: 2,
-              child: const ColoredBox(color: DsColor.white),
+              child: const ColoredBox(color: DsColor.secondary),
             ),
           Positioned(
             left: 0,
@@ -396,7 +395,7 @@ class TrashDropZone extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                'ลากมาปล่อยเพื่อลบ',
+                'Drop here to delete',
                 style: DsText.body(
                   size: DsType.sm,
                   color: active ? DsColor.ai2 : DsColor.whiteMid,

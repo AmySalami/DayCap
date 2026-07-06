@@ -51,6 +51,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     with SingleTickerProviderStateMixin {
   DateTime _selectedDay = startOfDay(DateTime.now());
   VideoPlayerController? _controller;
+  // controller คลิปก่อนหน้า (pause ค้างเฟรมสุดท้าย) วางไว้ข้างหลังกันจอดำแวบตอนสลับคลิป
+  VideoPlayerController? _prevController;
   List<Clip> _clips = const [];
   int _index = 0;
   double _progress = 0;
@@ -105,7 +107,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _progress = 0;
     if (_clips.isEmpty) {
       await _controller?.dispose();
-      if (mounted) setState(() => _controller = null);
+      await _prevController?.dispose();
+      if (mounted) {
+        setState(() {
+          _controller = null;
+          _prevController = null;
+        });
+      }
       return;
     }
     await _playAt(0);
@@ -145,14 +153,29 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       return;
     }
     final old = _controller;
+    old?.removeListener(_watch);
+    old?.pause(); // ค้างเฟรมสุดท้ายไว้ข้างหลัง
     next.addListener(_watch);
+    final lingering = _prevController; // ตัวค้างจาก swap ก่อน (ถ้าสลับเร็ว)
     setState(() {
+      _prevController = old; // วางเฟรมเดิมไว้ข้างหลังกันจอดำ
       _controller = next;
       _index = i;
       _progress = 0;
     });
-    old?.removeListener(_watch);
-    await old?.dispose();
+    await lingering?.dispose();
+
+    // ทิ้งตัวเดิมหลังคลิปใหม่เรนเดอร์เฟรมแรกแล้ว (กันจอดำแวบ)
+    final retire = old;
+    Future.delayed(const Duration(milliseconds: 240), () {
+      if (!identical(_prevController, retire)) return; // มี swap ใหม่แซง
+      retire?.dispose();
+      if (mounted) {
+        setState(() => _prevController = null);
+      } else {
+        _prevController = null;
+      }
+    });
   }
 
   void _watch() {
@@ -193,20 +216,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _loadDay();
   }
 
-  void _changeDayBy(int delta) {
-    final target = stepDay(_selectedDay, delta);
-    if (target != _selectedDay) _selectDay(target);
-  }
-
-  void _onDaySwipe(DragEndDetails d) {
-    if (_editing) return;
-    final v = d.primaryVelocity ?? 0;
-    if (v < -60) {
-      _changeDayBy(1);
-    } else if (v > 60) {
-      _changeDayBy(-1);
-    }
-  }
 
   // ---- edit mode ----
   void _enterEdit() {
@@ -288,7 +297,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
     _controller?.pause();
     setState(() => _sharing = true);
-    _shareProgress.value = const ExportProgress(0, 1, 'กำลังเริ่ม…');
+    _shareProgress.value = const ExportProgress(0, 1, 'Starting…');
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -300,7 +309,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             children: [
               LinearProgressIndicator(value: p?.fraction),
               const SizedBox(height: 16),
-              Text(p?.message ?? 'กำลังประมวลผล…'),
+              Text(p?.message ?? 'Processing…'),
             ],
           ),
         ),
@@ -322,7 +331,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text('รวมวิดีโอไม่สำเร็จ')));
+        ).showSnackBar(const SnackBar(content: Text('Failed to merge video')));
       }
     } finally {
       if (mounted) {
@@ -340,6 +349,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _shareProgress.dispose();
     _controller?.removeListener(_watch);
     _controller?.dispose();
+    _prevController?.dispose();
     super.dispose();
   }
 
@@ -370,6 +380,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           if (d.value.clips.isNotEmpty) d.key,
     };
     final c = _controller;
+    final p = _prevController; // เฟรมคลิปก่อนหน้า วางข้างหลังกันจอดำ
     final t = _edit.value; // 0=home, 1=edit
     final showEdit = t > 0.001;
     final bottomPad = MediaQuery.of(context).padding.bottom;
@@ -391,11 +402,32 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       borderRadius: BorderRadius.circular(28),
                       child: GestureDetector(
                         behavior: HitTestBehavior.opaque,
-                        onHorizontalDragEnd: _onDaySwipe,
+                        // ปัดแนวนอนทั้งหน้า = เข้ากล้อง (finger-tracked) — ปิดตอน edit
+                        onHorizontalDragStart: _editing
+                            ? null
+                            : (_) => widget.onPagerDragStart?.call(),
+                        onHorizontalDragUpdate: _editing
+                            ? null
+                            : (d) => widget.onPagerDragUpdate?.call(d.delta.dx),
+                        onHorizontalDragEnd: _editing
+                            ? null
+                            : (d) => widget.onPagerDragEnd?.call(
+                                d.primaryVelocity ?? 0,
+                              ),
                         onTap: _editing ? _togglePlay : null,
                         child: Stack(
                           fit: StackFit.expand,
                           children: [
+                            // เฟรมคลิปก่อนหน้า (ข้างหลัง) กันจอดำแวบระหว่างสลับ
+                            if (p != null && p.value.isInitialized)
+                              FittedBox(
+                                fit: BoxFit.cover,
+                                child: SizedBox(
+                                  width: p.value.size.width,
+                                  height: p.value.size.height,
+                                  child: VideoPlayer(p),
+                                ),
+                              ),
                             if (c != null && c.value.isInitialized)
                               FittedBox(
                                 fit: BoxFit.cover,
@@ -407,7 +439,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                               )
                             else if (_clips.isEmpty)
                               _EmptyDay(day: _selectedDay)
-                            else
+                            else if (p == null)
                               const ColoredBox(color: AppToken.videoBackdrop),
 
                             // overlay ในกรอบ (จางเมื่อ edit)
@@ -431,9 +463,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                         _index < _clips.length)
                                       Positioned(
                                         top: 30,
-                                        left: 12,
-                                        child: TimeBadge(
-                                          label: _clips[_index].label,
+                                        left: 0,
+                                        right: 0,
+                                        child: Center(
+                                          child: TimeBadge(
+                                            label: _clips[_index].label,
+                                          ),
                                         ),
                                       ),
                                     Positioned(
@@ -604,7 +639,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           Expanded(
             child: Center(
               child: Text(
-                'แก้ไข',
+                'Edit',
                 style: DsText.body(color: DsColor.white, weight: DsType.bold),
               ),
             ),
@@ -658,12 +693,12 @@ class _EmptyDay extends StatelessWidget {
   const _EmptyDay({required this.day});
   final DateTime day;
 
-  static const _dowTh = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
+  static const _dow = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
   @override
   Widget build(BuildContext context) {
     final isToday = day == startOfDay(DateTime.now());
-    final dow = _dowTh[day.weekday % 7];
+    final dow = _dow[day.weekday % 7];
 
     return Container(
       decoration: const BoxDecoration(
@@ -684,7 +719,7 @@ class _EmptyDay extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           Text(
-            isToday ? 'ยังไม่มีคลิปวันนี้' : 'ไม่มีคลิป',
+            isToday ? 'No clips today yet' : 'No clips',
             style: DsText.display(
               size: DsType.h3,
               color: DsColor.white,

@@ -11,6 +11,7 @@ import '../../core/utils/time_utils.dart';
 import '../../core/widgets/glass.dart';
 import '../../core/widgets/time_badge.dart';
 import '../../providers/reel_provider.dart';
+import '../home/widgets/week_calendar_strip.dart';
 import 'widgets/hold_button.dart';
 
 class RecordScreen extends ConsumerStatefulWidget {
@@ -76,7 +77,7 @@ class _RecordScreenState extends ConsumerState<RecordScreen>
     try {
       if (_cameras.isEmpty) _cameras = await availableCameras();
       if (_cameras.isEmpty) {
-        if (mounted) setState(() => _error = 'ไม่พบกล้องบนอุปกรณ์นี้');
+        if (mounted) setState(() => _error = 'No camera found on this device');
         return;
       }
       final cam = _cameras.firstWhere(
@@ -99,7 +100,7 @@ class _RecordScreenState extends ConsumerState<RecordScreen>
         _torch = false;
       });
     } catch (e) {
-      if (mounted) setState(() => _error = 'เปิดกล้องไม่ได้: $e');
+      if (mounted) setState(() => _error = 'Cannot open camera: $e');
     } finally {
       _initializing = false;
     }
@@ -238,7 +239,7 @@ class _RecordScreenState extends ConsumerState<RecordScreen>
         _scheduleStop();
       }
     } catch (e) {
-      setState(() => _error = 'เริ่มอัดไม่ได้: $e');
+      setState(() => _error = 'Cannot start recording: $e');
     }
   }
 
@@ -264,7 +265,7 @@ class _RecordScreenState extends ConsumerState<RecordScreen>
         return;
       }
     } catch (e) {
-      setState(() => _error = 'บันทึกไม่ได้: $e');
+      setState(() => _error = 'Cannot save: $e');
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -283,106 +284,134 @@ class _RecordScreenState extends ConsumerState<RecordScreen>
   @override
   Widget build(BuildContext context) {
     final c = _controller;
+    final bottomPad = MediaQuery.of(context).padding.bottom;
 
     return Scaffold(
       backgroundColor: AppToken.videoBackdrop,
-      body: SafeArea(
-        child: Column(
-          children: [
-            // กรอบกล้องมน — ปัดแนวนอนที่นี่ = ขับ pager กลับ Home แบบ finger-tracked
-            Expanded(
-              child: GestureDetector(
-                onHorizontalDragStart: (_) => widget.onPagerDragStart?.call(),
-                onHorizontalDragUpdate: (d) =>
-                    widget.onPagerDragUpdate?.call(d.delta.dx),
-                onHorizontalDragEnd: (d) =>
-                    widget.onPagerDragEnd?.call(d.primaryVelocity ?? 0),
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(10, 6, 10, 10),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(28),
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        if (_error != null)
-                          _ErrorView(message: _error!, onRetry: _retry)
-                        else if (c != null && c.value.isInitialized)
-                          FittedBox(
-                            fit: BoxFit.cover,
-                            child: SizedBox(
-                              width: c.value.previewSize?.height ?? 1080,
-                              height: c.value.previewSize?.width ?? 1920,
-                              child: CameraPreview(c),
-                            ),
-                          )
-                        else
-                          const ColoredBox(color: AppToken.videoBackdrop),
+      body: Stack(
+        children: [
+          SafeArea(
+            bottom: false,
+            child: Column(
+              children: [
+                // กรอบกล้องมน — ปัดแนวนอนที่นี่ = ขับ pager กลับ Home แบบ finger-tracked
+                Expanded(
+                  child: GestureDetector(
+                    onHorizontalDragStart: (_) =>
+                        widget.onPagerDragStart?.call(),
+                    onHorizontalDragUpdate: (d) =>
+                        widget.onPagerDragUpdate?.call(d.delta.dx),
+                    onHorizontalDragEnd: (d) =>
+                        widget.onPagerDragEnd?.call(d.primaryVelocity ?? 0),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(10, 6, 10, 10),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(28),
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            if (_error != null)
+                              _ErrorView(message: _error!, onRetry: _retry)
+                            else if (c != null && c.value.isInitialized)
+                              FittedBox(
+                                fit: BoxFit.cover,
+                                child: SizedBox(
+                                  width: c.value.previewSize?.height ?? 1080,
+                                  height: c.value.previewSize?.width ?? 1920,
+                                  child: CameraPreview(c),
+                                ),
+                              )
+                            else
+                              const ColoredBox(color: AppToken.videoBackdrop),
 
-                        // ป้ายเวลา กลางจอ
-                        Center(child: TimeBadge(label: _nowLabel)),
+                            // ป้ายเวลา กลางจอ
+                            Center(child: TimeBadge(label: _nowLabel)),
 
-                        // ปุ่มปิด (ขวาบน)
-                        Positioned(
-                          top: 12,
-                          right: 12,
-                          child: GlassCircle(
-                            onTap: _exit,
-                            child: const Icon(
-                              Icons.close,
-                              color: DsColor.white,
-                              size: 24,
+                            // ปุ่มปิด (ขวาบน)
+                            Positioned(
+                              top: 12,
+                              right: 12,
+                              child: GlassCircle(
+                                onTap: _exit,
+                                child: const Icon(
+                                  Icons.close,
+                                  color: DsColor.white,
+                                  size: 24,
+                                ),
+                              ),
                             ),
-                          ),
+
+                            // แฟลช (ซ้ายล่างในกรอบ)
+                            if (_lens == CameraLensDirection.back)
+                              Positioned(
+                                left: 12,
+                                bottom: 12,
+                                child: GlassCircle(
+                                  onTap: _toggleTorch,
+                                  child: Icon(
+                                    _torch ? Icons.flash_on : Icons.flash_off,
+                                    color: DsColor.white,
+                                    size: 24,
+                                  ),
+                                ),
+                              ),
+
+                            // countdown self-timer
+                            if (_countdown > 0)
+                              Center(
+                                child: Text(
+                                  '$_countdown',
+                                  style: DsText.display(
+                                    size: 96,
+                                    color: DsColor.white,
+                                  ),
+                                ),
+                              ),
+
+                            if (_saving)
+                              const Positioned(
+                                bottom: 14,
+                                left: 0,
+                                right: 0,
+                                child: Center(
+                                  child: Text(
+                                    'Saving…',
+                                    style: TextStyle(color: DsColor.white),
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
-
-                        // แฟลช (ซ้ายล่างในกรอบ)
-                        if (_lens == CameraLensDirection.back)
-                          Positioned(
-                            left: 12,
-                            bottom: 12,
-                            child: GlassCircle(
-                              onTap: _toggleTorch,
-                              child: Icon(
-                                _torch ? Icons.flash_on : Icons.flash_off,
-                                color: DsColor.white,
-                                size: 24,
-                              ),
-                            ),
-                          ),
-
-                        // countdown self-timer
-                        if (_countdown > 0)
-                          Center(
-                            child: Text(
-                              '$_countdown',
-                              style: DsText.display(
-                                size: 96,
-                                color: DsColor.white,
-                              ),
-                            ),
-                          ),
-
-                        if (_saving)
-                          const Positioned(
-                            bottom: 14,
-                            left: 0,
-                            right: 0,
-                            child: Center(
-                              child: Text(
-                                'กำลังบันทึก…',
-                                style: TextStyle(color: DsColor.white),
-                              ),
-                            ),
-                          ),
-                      ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ),
 
-            // แถวควบคุม: timer · shutter · swap
-            Padding(
+                // spacer สูงเท่าโซนปฏิทินของ Home เป๊ะ (ซ่อน opacity 0) → กรอบกล้อง = กรอบ Home
+                IgnorePointer(
+                  child: Opacity(
+                    opacity: 0,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                      child: WeekCalendarStrip(
+                        selectedDay: DateTime.now(),
+                        daysWithClips: const {},
+                        onSelect: (_) {},
+                      ),
+                    ),
+                  ),
+                ),
+                SizedBox(height: bottomPad + 60),
+              ],
+            ),
+          ),
+
+          // แถวควบคุม (overlay ลอย) — ไม่กินความสูงกรอบ ให้กรอบเท่ากับหน้า Home
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: bottomPad + 60,
+            child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 32),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -420,10 +449,8 @@ class _RecordScreenState extends ConsumerState<RecordScreen>
                 ],
               ),
             ),
-            // เว้นที่ให้ tab ของ shell ที่ปักอยู่ล่างสุด
-            const SizedBox(height: 66),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -464,7 +491,7 @@ class _ErrorView extends StatelessWidget {
               style: DsText.body(color: DsColor.whiteMid),
             ),
             const SizedBox(height: 16),
-            FilledButton(onPressed: onRetry, child: const Text('ลองอีกครั้ง')),
+            FilledButton(onPressed: onRetry, child: const Text('Try again')),
           ],
         ),
       ),

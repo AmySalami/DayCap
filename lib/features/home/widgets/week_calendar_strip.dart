@@ -17,7 +17,7 @@ class WeekCalendarStrip extends StatelessWidget {
   final Set<DateTime> daysWithClips;
   final ValueChanged<DateTime> onSelect;
 
-  static const _dowTh = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
+  static const _dow = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
   @override
   Widget build(BuildContext context) {
@@ -30,7 +30,7 @@ class WeekCalendarStrip extends StatelessWidget {
       children: List.generate(days.length, (i) {
         final day = days[i];
         return _DayChip(
-          dow: _dowTh[i],
+          dow: _dow[i],
           dayNum: day.day,
           isSelected: day == selected,
           isToday: day == today,
